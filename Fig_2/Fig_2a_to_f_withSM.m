@@ -2,11 +2,12 @@
 % Weinan Sun 10-10-2021
 
 tic
-close all
+hold on
+% close all
 clear all
 
 r_n = 1; % number of repeats
-nepoch = 2000;
+nepoch = 500;
 learnrate = 0.015;
 N_x_t = 100; % teacher input dimension
 N_y_t = 1; % teacher output dimension
@@ -33,9 +34,10 @@ N_y_s = N_y_t;
 
 M = 2000; % num of units in notebook
 a = 0.05; % notebook sparseness
-gamma = 0.6;    % inhibtion parameter
+gamma = 0;    % inhibtion parameter
 U = -0.15;    % threshold for unit activation
 ncycle = 9;   %  number of recurrent cycles
+sm_size = 0.35;
 
 
 % Matrices for storing train error, test error, reactivation error (driven by notebook)
@@ -98,8 +100,7 @@ for r = 1:r_n
     %% Generate offline training data from notebook reactivations
     N_patterns_reactivated = zeros(P,M,nepoch,'logical'); % array for storing retrieved notebook patterns, pre-calculating all epochs for speed considerations
     % >> generates all Notebook offline reactivations (an PxM for each epoch) 
-    
-    parfor m = 1:nepoch
+    for m = 1:nepoch
         %for m = 1:nepoch % regular for-loop 
         
         %% Notebook pattern completion through recurrent dynamis
@@ -117,34 +118,39 @@ for r = 1:r_n
         % from any of the encoded patterns.
         
         % Start recurrent cycles with dynamic threshold
-        Activity_dyn_t = zeros(P, M);
-        
-        % First round of pattern completion through recurrent activtion cycles given
-        % random initial input.
-        for cycle = 1:ncycle
-            if cycle <=1
-               clamp = 1;
-            else
-               clamp = 0;
-            end
-            rand_patt = (rand(P,M)<=a); % random seeding activity
-            % Seeding notebook with random patterns
-            M_input = Activity_dyn_t + (rand_patt*clamp);
-            % Seeding notebook with original patterns
-            % M_input = Activity_dyn_t + (N_patterns*clamp);
-            M_current = M_input*W_N;
-            % scale currents between 0 and 1
-            scale = 1.0 ./ (max(M_current,[],2) - min(M_current,[],2));
-            M_current = (M_current - min(M_current,[],2)) .* scale;
-            % find threshold based on desired sparseness
-            sorted_M_current = sort(M_current,2,'descend');
-            t_ind = floor(size(Activity_dyn_t,2) * a);
-            t_ind(t_ind<1) = 1;
-            t = sorted_M_current(:,t_ind); % threshold for unit activations
-            Activity_dyn_t = (M_current >=t);
-        end
+%         Activity_dyn_t = zeros(P, M);
+%         
+%         % First round of pattern completion through recurrent activtion cycles given
+%         % random initial input.
+%         for cycle = 1:ncycle
+%             if cycle <=1
+%                clamp = 1;
+%             else
+%                clamp = 0;
+%             end
+%             rand_patt = (rand(P,M)<=a); % random seeding activity
+% %             mask_patt = (rand(P,M)<=0.5);
+% %             rand_ind = randperm(M,0.4*M);
+% %             rand_patt = N_patterns;
+% %             rand_patt(:,rand_ind) = mask_patt(:,rand_ind);
+%             % Seeding notebook with random patterns
+%             M_input = Activity_dyn_t + (rand_patt*clamp);
+%             % Seeding notebook with original patterns
+% %             M_input = Activity_dyn_t + (N_patterns*clamp);
+%             M_current = M_input*W_N;
+%             % scale currents between 0 and 1
+%             scale = 1.0 ./ (max(M_current,[],2) - min(M_current,[],2));
+%             M_current = (M_current - min(M_current,[],2)) .* scale;
+%             % find threshold based on desired sparseness
+%             sorted_M_current = sort(M_current,2,'descend');
+%             t_ind = floor(size(Activity_dyn_t,2) * a);
+%             t_ind(t_ind<1) = 1;
+%             t = sorted_M_current(:,t_ind); % threshold for unit activations
+%             Activity_dyn_t = (M_current >=t);
+%         end
         
         % Second round of pattern completion, with fix threshold
+        Activity_dyn_t = N_patterns(randperm(P),:);
         Activity_fix_t = zeros(P, M);
         for cycle = 1:ncycle
             if cycle <=1
@@ -155,6 +161,11 @@ for r = 1:r_n
             M_input = Activity_fix_t + Activity_dyn_t*clamp;
             M_current = M_input*W_N;
             Activity_fix_t = (M_current >= U); % U is the fixed threshold
+        end
+        for l=1:P*sm_size
+            ind = randperm(100,2);
+            patt = logical(N_patterns(ind(1),:)+N_patterns(ind(2),:));
+            Activity_fix_t(ind(1),:) = patt;
         end
         N_patterns_reactivated(:,:,m)=Activity_fix_t;
     end
@@ -194,7 +205,7 @@ for r = 1:r_n
     error_N_train_vector = ones(nepoch,1)*error_N_train; 
     N_train_error_all(r,:) = error_N_train_vector;
     
-    % Notebook generalization error
+    % Notebook generalization error (red dashed line)
     Activity_notebook_test = zeros(P_test, M);
     for cycle = 1:ncycle
         if cycle <=1
@@ -235,7 +246,7 @@ for r = 1:r_n
         S_prediction_test =  x_t_input_test*W_s; % student output prediction calculated by true testing inputs and student weights
         
         % EXTERNAL MEASURES OF accuracy (observer, not what the nw uses):
-        % Train error (rael, i.e. compared to GT)
+        % Train error (real, i.e. compared to GT)
         delta_train = y_t_output - S_prediction;
         error_train = sum(delta_train.^2)/P;
         error_train_vector(m) = error_train;
@@ -254,13 +265,13 @@ for r = 1:r_n
     test_error_all(r,:) = error_test_vector;
     
     % Early stopping 
-    [min_v, min_p] = min(error_test_vector);
-    train__error_early_stop = error_train_vector;
-    train__error_early_stop (min_p+1:end) = error_train_vector (min_p);
-    test_error_early_stop = error_test_vector;
-    test_error_early_stop (min_p+1:end) = error_test_vector (min_p);
-    train_error_early_stop_all(r,:) = train__error_early_stop;
-    test_error_early_stop_all(r,:) = test_error_early_stop;
+%     [min_v, min_p] = min(error_test_vector);
+%     train__error_early_stop = error_train_vector;
+%     train__error_early_stop (min_p+1:end) = error_train_vector (min_p);
+%     test_error_early_stop = error_test_vector;
+%     test_error_early_stop (min_p+1:end) = error_test_vector (min_p);
+%     train_error_early_stop_all(r,:) = train__error_early_stop;
+%     test_error_early_stop_all(r,:) = test_error_early_stop;
 end
 
 toc
@@ -272,12 +283,12 @@ line_w = 2;
 font_s = 12;
 
 % Without early stopping
-figure(1)
+figure(3)
 hold on
-plot(1:nepoch,mean(train_error_all,1),'color',color_scheme(1,:),'LineWidth',line_w)
-plot(1:nepoch,mean(test_error_all,1),'color',color_scheme(2,:),'LineWidth',line_w)
-plot(1:nepoch,mean(N_train_error_all,1),'b--','LineWidth',2)
-plot(1:nepoch,mean(N_test_error_all,1),'r--','LineWidth',2)
+plot(1:nepoch,mean(train_error_all,1),'color',color_scheme(1,:),'LineWidth',line_w, 'LineStyle','-.')
+plot(1:nepoch,mean(test_error_all,1),'color',color_scheme(2,:),'LineWidth',line_w, 'LineStyle','-.')
+% plot(1:nepoch,mean(N_train_error_all,1),'g--','LineWidth',2)
+% plot(1:nepoch,mean(N_test_error_all,1),'o--','LineWidth',2)
 
 set(gca, 'FontSize', font_s)
 set(gca, 'FontSize', font_s)
@@ -292,21 +303,21 @@ set(gcf,'position',[100,100,350,300])
 % saveas(gcf,strcat('Errors_No_ES_','SNR_',num2str(SNR),'_',date,'.pdf'));
 
 % With early stopping
-figure(2)
-hold on
-plot(1:nepoch,mean(train_error_early_stop_all,1),'color',color_scheme(1,:),'LineWidth',line_w)
-plot(1:nepoch,mean(test_error_early_stop_all,1),'color',color_scheme(2,:),'LineWidth',line_w)
-plot(1:nepoch,mean(N_train_error_all,1),'b--','LineWidth',line_w)
-plot(1:nepoch,mean(N_test_error_all,1),'r--','LineWidth',line_w)
-
-set(gca, 'FontSize', font_s)
-set(gca, 'FontSize', font_s)
-xlabel('Epoch','Color','k')
-ylabel('Error','Color','k')
-xlim([0 nepoch])
-ylim([0 2])
-set(gca,'linewidth',1)
-set(gcf,'position',[600,100,350,300])
+% figure(2)
+% hold on
+% plot(1:nepoch,mean(train_error_early_stop_all,1),'color',color_scheme(1,:),'LineWidth',line_w)
+% plot(1:nepoch,mean(test_error_early_stop_all,1),'color',color_scheme(2,:),'LineWidth',line_w)
+% plot(1:nepoch,mean(N_train_error_all,1),'b--','LineWidth',line_w)
+% plot(1:nepoch,mean(N_test_error_all,1),'r--','LineWidth',line_w)
+% 
+% set(gca, 'FontSize', font_s)
+% set(gca, 'FontSize', font_s)
+% xlabel('Epoch','Color','k')
+% ylabel('Error','Color','k')
+% xlim([0 nepoch])
+% ylim([0 2])
+% set(gca,'linewidth',1)
+% set(gcf,'position',[600,100,350,300])
 
 % Save plot
 % saveas(gcf,strcat('Errors_ES_','SNR_',num2str(SNR),'_',date,'.pdf'));
