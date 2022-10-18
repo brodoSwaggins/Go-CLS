@@ -37,7 +37,7 @@ a = 0.05; % notebook sparseness
 gamma = 0;    % inhibtion parameter
 U = -0.15;    % threshold for unit activation
 ncycle = 9;   %  number of recurrent cycles
-sm_size = 0.35;
+sm_size = 0;
 
 
 % Matrices for storing train error, test error, reactivation error (driven by notebook)
@@ -72,6 +72,11 @@ for r = 1:r_n
     noise_test = normrnd(0,variance_e^0.5,[P_test,N_y_t]); 
     x_t_input_test = normrnd(0,(1/N_x_t)^0.5,[P_test,N_x_t]);
     y_t_output_test = x_t_input_test*W_t + noise_test;
+
+    % reactivation data
+    x_t_input_replay = normrnd(0,(1/N_x_t)^0.5,[nepoch,N_x_t]); % inputs
+    y_t_output_replay = x_t_input_replay*W_t;
+
     
     %% Notebook Network
     % Generate P random binary indices (0 or 1) with sparseness a
@@ -100,7 +105,7 @@ for r = 1:r_n
     %% Generate offline training data from notebook reactivations
     N_patterns_reactivated = zeros(P,M,nepoch,'logical'); % array for storing retrieved notebook patterns, pre-calculating all epochs for speed considerations
     % >> generates all Notebook offline reactivations (an PxM for each epoch) 
-    for m = 1:nepoch
+    parfor m = 1:nepoch
         %for m = 1:nepoch % regular for-loop 
         
         %% Notebook pattern completion through recurrent dynamis
@@ -148,10 +153,53 @@ for r = 1:r_n
 %             t = sorted_M_current(:,t_ind); % threshold for unit activations
 %             Activity_dyn_t = (M_current >=t);
 %         end
-        
+
+%================= Alternatively - offline activation by cortical novel patterns
+%===============================================================================
+% 
+%         Activity_dyn_t = zeros(P, M);
+%         
+%         % First round of pattern completion through recurrent activtion cycles given
+%         % random initial input.
+%         for cycle = 1:ncycle
+%             if cycle <=1
+%                clamp = 1;
+%             else
+%                clamp = 0;
+%             end
+%             seed_replay = (rand(P,M)<=a); % random seeding activity
+% %             mask_patt = (rand(P,M)<=0.5);
+% %             rand_ind = randperm(M,0.4*M);
+% %             rand_patt = N_patterns;
+% %             rand_patt(:,rand_ind) = mask_patt(:,rand_ind);
+%             % Seeding notebook with random patterns
+%             M_input = Activity_dyn_t + (rand_patt*clamp);
+%             % Seeding notebook with original patterns
+% %             M_input = Activity_dyn_t + (N_patterns*clamp);
+%             M_current = M_input*W_N;
+%             % scale currents between 0 and 1
+%             scale = 1.0 ./ (max(M_current,[],2) - min(M_current,[],2));
+%             M_current = (M_current - min(M_current,[],2)) .* scale;
+%             % find threshold based on desired sparseness
+%             sorted_M_current = sort(M_current,2,'descend');
+%             t_ind = floor(size(Activity_dyn_t,2) * a);
+%             t_ind(t_ind<1) = 1;
+%             t = sorted_M_current(:,t_ind); % threshold for unit activations
+%             Activity_dyn_t = (M_current >=t);
+%         end
+% 
+%================= Alternatively - start from stored patterns, explicitly use SM
+%===============================================================================
+       
         % Second round of pattern completion, with fix threshold
-        Activity_dyn_t = N_patterns(randperm(P),:);
+        Activity_dyn_t = N_patterns; %(randperm(P),:);
         Activity_fix_t = zeros(P, M);
+        % replace sm_size part of the patterns by random SM logical combinations 
+        for l=1:P*sm_size
+            ind = randperm(100,2);
+            patt = logical(N_patterns(ind(1),:)+N_patterns(ind(2),:));
+            Activity_dyn_t(ind(1),:) = patt;
+        end
         for cycle = 1:ncycle
             if cycle <=1
                 clamp = 1;
@@ -162,13 +210,12 @@ for r = 1:r_n
             M_current = M_input*W_N;
             Activity_fix_t = (M_current >= U); % U is the fixed threshold
         end
-        for l=1:P*sm_size
-            ind = randperm(100,2);
-            patt = logical(N_patterns(ind(1),:)+N_patterns(ind(2),:));
-            Activity_fix_t(ind(1),:) = patt;
-        end
         N_patterns_reactivated(:,:,m)=Activity_fix_t;
+        
+        
+
     end
+
     % **(dashed blue line in fig1a)** Notebook memorization: Seeding with
     % real input, how accurate is reactivated output
 
@@ -188,13 +235,13 @@ for r = 1:r_n
         seed_patt = x_t_input*W_S_N_Lin;
         M_input = Activity_notebook_train + (seed_patt*clamp);
         M_current = M_input*W_N;
-        scale = 1.0 ./ (max(M_current,[],2) - min(M_current,[],2));
-        M_current = (M_current - min(M_current,[],2)) .* scale;
-        sorted_M_current = sort(M_current,2,'descend');
-        t_ind = floor(size(Activity_notebook_train,2) * a);
-        t_ind(t_ind<1) = 1;
-        t = sorted_M_current(:,t_ind); 
-        Activity_notebook_train = (M_current >=t);
+%         scale = 1.0 ./ (max(M_current,[],2) - min(M_current,[],2));
+%         M_current = (M_current - min(M_current,[],2)) .* scale;
+%         sorted_M_current = sort(M_current,2,'descend');
+%         t_ind = floor(size(Activity_notebook_train,2) * a);
+%         t_ind(t_ind<1) = 1;
+%         t = sorted_M_current(:,t_ind); 
+        Activity_notebook_train = (M_current >=0.5);
     end
     N_S_output_train = Activity_notebook_train*W_N_S_Lout;
     % Notebook training error
@@ -283,10 +330,10 @@ line_w = 2;
 font_s = 12;
 
 % Without early stopping
-figure(3)
+figure(1)
 hold on
-plot(1:nepoch,mean(train_error_all,1),'color',color_scheme(1,:),'LineWidth',line_w, 'LineStyle','-.')
-plot(1:nepoch,mean(test_error_all,1),'color',color_scheme(2,:),'LineWidth',line_w, 'LineStyle','-.')
+plot(1:nepoch,mean(train_error_all,1),'color',color_scheme(1,:),'LineWidth',line_w, 'LineStyle',':')
+plot(1:nepoch,mean(test_error_all,1),'color',color_scheme(2,:),'LineWidth',line_w, 'LineStyle',':')
 % plot(1:nepoch,mean(N_train_error_all,1),'g--','LineWidth',2)
 % plot(1:nepoch,mean(N_test_error_all,1),'o--','LineWidth',2)
 
