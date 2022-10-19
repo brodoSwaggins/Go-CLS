@@ -74,7 +74,12 @@ for r = 1:r_n
     y_t_output_test = x_t_input_test*W_t + noise_test;
 
     % reactivation data
-    x_t_input_replay = normrnd(0,(1/N_x_t)^0.5,[nepoch,N_x_t]); % inputs
+    x_t_input_replay = x_t_input;
+    for l=1:P*sm_size
+        ind = randperm(P,2);
+        patt = logical(x_t_input_replay(ind(1),:)+x_t_input_replay(ind(2),:));
+        x_t_input_replay(ind(1),:) = patt;
+    end
     y_t_output_replay = x_t_input_replay*W_t;
 
     
@@ -167,27 +172,21 @@ for r = 1:r_n
 %             else
 %                clamp = 0;
 %             end
-%             seed_replay = (rand(P,M)<=a); % random seeding activity
-% %             mask_patt = (rand(P,M)<=0.5);
-% %             rand_ind = randperm(M,0.4*M);
-% %             rand_patt = N_patterns;
-% %             rand_patt(:,rand_ind) = mask_patt(:,rand_ind);
-%             % Seeding notebook with random patterns
-%             M_input = Activity_dyn_t + (rand_patt*clamp);
-%             % Seeding notebook with original patterns
-% %             M_input = Activity_dyn_t + (N_patterns*clamp);
+%             seed_replay = x_t_input_replay*W_S_N_Lin; % activition by more examples
+%             M_input = Activity_dyn_t + (seed_replay*clamp);
 %             M_current = M_input*W_N;
 %             % scale currents between 0 and 1
-%             scale = 1.0 ./ (max(M_current,[],2) - min(M_current,[],2));
-%             M_current = (M_current - min(M_current,[],2)) .* scale;
-%             % find threshold based on desired sparseness
-%             sorted_M_current = sort(M_current,2,'descend');
-%             t_ind = floor(size(Activity_dyn_t,2) * a);
-%             t_ind(t_ind<1) = 1;
-%             t = sorted_M_current(:,t_ind); % threshold for unit activations
-%             Activity_dyn_t = (M_current >=t);
+% %             scale = 1.0 ./ (max(M_current,[],2) - min(M_current,[],2));
+% %             M_current = (M_current - min(M_current,[],2)) .* scale;
+% %             % find threshold based on desired sparseness
+% %             sorted_M_current = sort(M_current,2,'descend');
+% %             t_ind = floor(size(Activity_dyn_t,2) * a);
+% %             t_ind(t_ind<1) = 1;
+% %             t = sorted_M_current(:,t_ind); % threshold for unit activations
+%             Activity_dyn_t = (M_current >=0.5);
 %         end
-% 
+%         N_patterns_reactivated(:,:,m)=Activity_dyn_t;
+
 %================= Alternatively - start from stored patterns, explicitly use SM
 %===============================================================================
        
@@ -210,8 +209,9 @@ for r = 1:r_n
             M_current = M_input*W_N;
             Activity_fix_t = (M_current >= U); % U is the fixed threshold
         end
+%         Activity_fix_t = Activity_dyn_t; % TODO delete
         N_patterns_reactivated(:,:,m)=Activity_fix_t;
-        
+%         
         
 
     end
@@ -330,10 +330,10 @@ line_w = 2;
 font_s = 12;
 
 % Without early stopping
-figure(1)
+figure(4)
 hold on
-plot(1:nepoch,mean(train_error_all,1),'color',color_scheme(1,:),'LineWidth',line_w, 'LineStyle',':')
-plot(1:nepoch,mean(test_error_all,1),'color',color_scheme(2,:),'LineWidth',line_w, 'LineStyle',':')
+plot(1:nepoch,mean(train_error_all,1),'color',color_scheme(1,:),'LineWidth',line_w, 'LineStyle','-')
+plot(1:nepoch,mean(test_error_all,1),'color',color_scheme(2,:),'LineWidth',line_w, 'LineStyle','-')
 % plot(1:nepoch,mean(N_train_error_all,1),'g--','LineWidth',2)
 % plot(1:nepoch,mean(N_test_error_all,1),'o--','LineWidth',2)
 
